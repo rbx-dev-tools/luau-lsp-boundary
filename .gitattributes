@@ -1,0 +1,4 @@
+# Normalize every text file to LF in the repository, whatever the platform.
+# Without this a contributor on Windows turns a one-word change into a
+# whole-file diff, as happened between v0.1.0 and this commit.
+* text=auto eol=lf

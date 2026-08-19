@@ -2,7 +2,7 @@
 name = "luau-lsp-boundary"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.85"
+rust-version = "1.88"
 description = "Filters luau-lsp auto-import suggestions that cross a client/server boundary you define yourself"
 repository = "https://github.com/rbx-dev-tools/luau-lsp-boundary"
 license = "MPL-2.0"
