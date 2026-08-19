@@ -202,3 +202,8 @@ filter that matches nothing. It skips when no `luau-lsp` is on `PATH`.
 ## License
 
 MPL-2.0
+
+## Trademark
+
+Luau is a trademark of Roblox Corporation. This is an independent project, not
+affiliated with or endorsed by Roblox or the Luau team.
