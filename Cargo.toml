@@ -1,0 +1,20 @@
+[package]
+name = "luau-lsp-boundary"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+description = "Filters luau-lsp auto-import suggestions that cross a client/server boundary you define yourself"
+repository = "https://github.com/rbx-dev-tools/luau-lsp-boundary"
+license = "MPL-2.0"
+readme = "README.md"
+
+[dependencies]
+globset = "0.4"
+# preserve_order: contexts are evaluated in the order they are written in the
+# rules file, not in a BTreeMap's alphabetical order.
+serde_json = { version = "1", features = ["preserve_order"] }
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true

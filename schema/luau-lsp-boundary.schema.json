@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/rbx-dev-tools/luau-lsp-boundary/main/schema/luau-lsp-boundary.schema.json",
+  "title": "luau-lsp-boundary rules",
+  "description": "Contexts that decide which auto-import suggestions luau-lsp-boundary keeps. A path matching no context is Shared and sees everything.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "URL of this schema."
+    },
+    "log": {
+      "type": "boolean",
+      "default": false,
+      "description": "Report the server launched, the contexts loaded, and every suggestion dropped, on stderr. In VS Code this is the only way to turn logging on, since the extension passes neither arguments nor environment to the server."
+    },
+    "contexts": {
+      "type": "object",
+      "description": "Named contexts, tested in the order written. Two different contexts are incompatible; the names carry no meaning of their own.",
+      "additionalProperties": {
+        "oneOf": [
+          {
+            "type": "array",
+            "minItems": 1,
+            "items": { "$ref": "#/$defs/glob" },
+            "description": "Globs applied to both the file being edited and the modules suggested."
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "minProperties": 1,
+            "properties": {
+              "files": {
+                "type": "array",
+                "minItems": 1,
+                "items": { "$ref": "#/$defs/glob" },
+                "description": "Globs matched against the path on disk of the file being edited."
+              },
+              "modules": {
+                "type": "array",
+                "minItems": 1,
+                "items": { "$ref": "#/$defs/glob" },
+                "description": "Globs matched against a suggested module: its DataModel path (game/ReplicatedStorage/...) for an instance require, its path on disk for a string require."
+              }
+            },
+            "description": "Separate globs for each namespace, for when the folder name differs between disk and DataModel."
+          }
+        ]
+      },
+      "examples": [
+        {
+          "Client": ["**/Client/**"],
+          "Server": ["**/Server/**"]
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "glob": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Matched against the whole path, with / separators on every platform. * never crosses a /, so use ** for that. Case-sensitive.",
+      "examples": ["**/Client/**", "**/ServerScriptService/**"]
+    }
+  }
+}

@@ -1,0 +1,116 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Three platforms, unlike the Windows-only tools in this org: this binary spawns
+# a child process and shuffles bytes between pipes, and the parts most likely to
+# break differ per platform - path separators, `file://` URI shapes, and whether
+# a POSIX root survives decoding. A single runner would not see any of that.
+jobs:
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+      - uses: Swatinem/rust-cache@258712b0b7b1ddf8bddc9fc3b0faca682b2736c3 # v2
+      - run: cargo test --all-targets --verbose
+
+  e2e:
+    # The unit tests cover the filtering logic. This one covers what they
+    # cannot: message framing, request/response correlation, and the fact that a
+    # repo without a rules file gets a byte-for-byte passthrough.
+    name: End-to-end (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+      - uses: Swatinem/rust-cache@258712b0b7b1ddf8bddc9fc3b0faca682b2736c3 # v2
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 22
+      - run: cargo build
+      - run: node tests/e2e/run.mjs
+
+  real-server:
+    # The e2e job above drives a stand-in server whose completion items were
+    # written from a reading of luau-lsp's source. This one asks the real thing,
+    # so that the day upstream changes the shape of an auto-import item, CI says
+    # so rather than every test passing on a filter that matches nothing.
+    name: Against real luau-lsp
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+      - uses: Swatinem/rust-cache@258712b0b7b1ddf8bddc9fc3b0faca682b2736c3 # v2
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 22
+      - name: Install luau-lsp
+        run: |
+          set -euo pipefail
+          tag=$(gh api repos/JohnnyMorganz/luau-lsp/releases/latest --jq .tag_name)
+          echo "luau-lsp $tag"
+          gh release download "$tag" \
+            --repo JohnnyMorganz/luau-lsp \
+            --pattern '*linux-x86_64*' \
+            --output server.zip --clobber
+          unzip -j -o server.zip -d "$HOME/.local/bin"
+          chmod +x "$HOME/.local/bin/luau-lsp"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - run: luau-lsp --version
+      - run: cargo build
+      - run: node tests/e2e/real-server.mjs
+
+  fmt:
+    name: Rustfmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+      - run: cargo fmt --all -- --check
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+      - uses: Swatinem/rust-cache@258712b0b7b1ddf8bddc9fc3b0faca682b2736c3 # v2
+      - run: cargo clippy --all-targets -- -D warnings
+
+  msrv:
+    # rust-version in Cargo.toml is a promise to whoever builds from source.
+    # Nothing enforces it on the stable toolchain above, so it is checked here
+    # against the exact version it names - and it moves the day a dependency
+    # moves it, deliberately rather than silently.
+    name: MSRV (1.85)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          toolchain: "1.85"
+      - uses: Swatinem/rust-cache@258712b0b7b1ddf8bddc9fc3b0faca682b2736c3 # v2
+      - run: cargo check --all-targets
