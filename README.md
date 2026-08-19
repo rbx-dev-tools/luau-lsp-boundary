@@ -31,6 +31,9 @@ VS Code, in your **user** settings (`Preferences: Open User Settings (JSON)`):
 "luau-lsp.server.path": "/absolute/path/to/luau-lsp-boundary"
 ```
 
+The path has to be absolute: this setting is one of the few the extension does
+not expand `~` in.
+
 Any other editor: replace the luau-lsp command with `luau-lsp-boundary`.
 Arguments are forwarded verbatim.
 
@@ -49,15 +52,16 @@ Arguments are forwarded verbatim.
 ```
 
 The `$schema` line is optional but worth keeping: it gives you completion and
-inline errors while you type the file, instead of a message on stderr after a
-reload.
+inline errors while you type the file, rather than a message on stderr later.
 
-**4. Reload the window.** Done.
+**4. Reload the window.**
+
+Only step 2 needs that reload, because the editor is what launches the proxy.
+The rules file is re-read whenever it changes, so later edits, and adding or
+deleting it, take effect on the next completion.
 
 Without a rules file the proxy is a pure passthrough, so the user setting in
-step 2 is safe to leave on for every project. Only that first step needs a
-reload: the rules file itself is re-read whenever it changes, so later edits,
-and adding or deleting it, take effect on the next completion.
+step 2 is safe to leave on for every project.
 
 ## Rules
 
@@ -114,8 +118,7 @@ A rules file that exists but cannot be parsed is always reported, log or no
 log, and the root falls back to passthrough. The file is validated rather than
 read best-effort: an unknown key, a bare string where an array belongs, or a
 context with no globs is an error. All of those would otherwise produce rules
-that match nothing, and a filter that quietly stops filtering is the worst
-thing this tool can do.
+that match nothing, and leave you believing a boundary was being enforced.
 
 Arguments starting with `--boundary-` are consumed by the proxy, never
 forwarded.
@@ -137,17 +140,19 @@ editor spawns the proxy from an arbitrary directory, so without this you would
 silently get your globally installed version. Two windows on two repos pinning
 different versions each get the right one.
 
-The proxy's own version is still resolved from an unknown directory, so its
-global pin is what applies. Barely matters for a tool this small, but worth
-knowing.
+The proxy's own version is still resolved from an unknown directory, so if you
+installed it with rokit too, it is your global pin that applies to it rather
+than any per-project one.
 
 ## Limitations
 
 - Completion responses only. It will not stop you writing an invalid require by
   hand, and it is no substitute for the boundary being enforced at runtime.
 - Auto-import items are recognised by their shape (`kind == Module` plus a
-  non-empty `additionalTextEdits`). If upstream changes how they are built, the
-  filter silently stops matching, so turn on logging to find out.
+  non-empty `additionalTextEdits`). Should upstream change how they are built,
+  nothing errors: the filter simply matches nothing. With logging on, the sign
+  is the absence of any dropped-suggestion line. `tests/e2e/real-server.mjs`
+  exists to catch this.
 - In a multi-root workspace the deepest root containing the file supplies the
   rules, but the working directory comes from the first root. Open repos with
   different luau-lsp pins in separate windows.
@@ -172,8 +177,9 @@ site, in the instance-require importer. String requires, written
 despite the 1.67.0 changelog announcing both.
 
 **It reads `className`, not `RunContext`.** A script is Server if its class is
-`Script`, Client if it is `LocalScript`. A sourcemap cannot express
-`RunContext`, so under Rojo's `emitLegacyScripts: false` a `.client.luau`
+`Script`, Client if it is `LocalScript`. The word `RunContext` appears nowhere
+in luau-lsp, and its sourcemap parser reads only a node's name, class, file
+paths and children, so under Rojo's `emitLegacyScripts: false` a `.client.luau`
 becomes a plain `Script` and is classified Server. The original PR
 ([#1482](https://github.com/JohnnyMorganz/luau-lsp/pull/1482)) described
 categorising by `.client.luau` / `.server.luau` file extension; the merged code
