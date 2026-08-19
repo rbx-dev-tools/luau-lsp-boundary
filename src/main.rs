@@ -5,9 +5,10 @@
 //! module belongs to a context incompatible with the file that asked for the
 //! completion.
 //!
-//! luau-lsp already does this filtering, but only against hardcoded Roblox
-//! service names, and only for instance requires. It knows nothing of a
-//! project's own folder conventions, nor of string requires.
+//! luau-lsp already does this filtering, but only against a hardcoded list of
+//! Roblox service names. It knows nothing of a project's own folder
+//! conventions, and a script's context comes from its class, which cannot tell
+//! a RunContext client script from a server one.
 
 use luau_lsp_boundary::{
     contains, filter_completion, newest_extension, read_message, uri_to_path, write_message,

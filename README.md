@@ -160,7 +160,7 @@ than any per-project one.
 ## Why this exists
 
 luau-lsp has filtered these suggestions since 1.67.0, and on a default Rojo
-project it works. Three gaps remain.
+project it works. Two gaps remain.
 
 **It only knows Roblox service names.** A module's context depends on whether an
 ancestor is literally named `ServerScriptService`, `ServerStorage`,
@@ -169,12 +169,6 @@ under `ReplicatedStorage` is Shared, and Shared is compatible with everything,
 so if your client-only modules live in `ReplicatedStorage/.../Client`, as many
 projects do, nothing is ever filtered. A deliberate upstream decision, contested
 in [#1504](https://github.com/JohnnyMorganz/luau-lsp/issues/1504), still open.
-
-**It only filters instance requires.** `isScriptContextCompatible` has one call
-site, in the instance-require importer. String requires, written
-`require("@game/...")` and enabled by
-`luau-lsp.completion.imports.stringRequires.enabled`, bypass it entirely,
-despite the 1.67.0 changelog announcing both.
 
 **It reads `className`, not `RunContext`.** A script is Server if its class is
 `Script`, Client if it is `LocalScript`. The word `RunContext` appears nowhere
@@ -185,10 +179,10 @@ becomes a plain `Script` and is classified Server. The original PR
 categorising by `.client.luau` / `.server.luau` file extension; the merged code
 does not.
 
-The first two are worth fixing upstream. The third is why this proxy ignores
-class and context entirely and looks only at paths. But no upstream fix can
-teach luau-lsp that `features/*/Client` means client in *your* repo. That part
-is what this tool owns.
+The second is worth reporting upstream, and is why this proxy ignores class
+and run context entirely and looks only at paths. The first is the one that
+matters here: no upstream fix can teach luau-lsp that `features/*/Client` means
+client in *your* repo. That part is what this tool owns.
 
 ## Development
 
