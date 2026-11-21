@@ -52,6 +52,7 @@ jobs:
           node-version: 22
       - run: cargo build
       - run: node tests/e2e/run.mjs
+      - run: node tests/e2e/lifetime.mjs
 
   real-server:
     # The e2e job above drives a stand-in server whose completion items were

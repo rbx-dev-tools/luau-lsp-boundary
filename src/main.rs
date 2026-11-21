@@ -10,6 +10,8 @@
 //! conventions, and a script's context comes from its class, which cannot tell
 //! a RunContext client script from a server one.
 
+mod lifetime;
+
 use luau_lsp_boundary::{
     contains, filter_completion, newest_extension, read_message, uri_to_path, write_message,
     Pending, Workspace,
@@ -19,6 +21,7 @@ use std::io::{self, BufReader};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::{Duration, Instant};
 
 /// Prefix reserved for the proxy: these arguments are never forwarded to
 /// luau-lsp, which would reject them.
@@ -26,6 +29,33 @@ const OWN_ARG_PREFIX: &str = "--boundary-";
 
 /// The only LSP method this proxy acts on.
 const COMPLETION_METHOD: &[u8] = b"textDocument/completion";
+
+/// Sent to the server when the editor goes away without saying so.
+const EXIT_NOTIFICATION: &[u8] = br#"{"jsonrpc":"2.0","method":"exit"}"#;
+
+/// How long the server gets to exit by itself before its tree is killed.
+const GRACE: Duration = Duration::from_secs(2);
+
+/// Waits up to [`GRACE`] for the server to exit, then ends whatever is left
+/// of its tree. Returns the server's exit code, if it exited by itself.
+fn reap(child: &Mutex<Child>) -> Option<i32> {
+    let deadline = Instant::now() + GRACE;
+    let mut code = None;
+    loop {
+        if let Ok(Some(status)) = child.lock().unwrap().try_wait() {
+            code = status.code();
+            break;
+        }
+        if Instant::now() >= deadline {
+            break;
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+    // Even after the direct child exited: with a shim in between, the real
+    // server can still be running below it.
+    lifetime::end_tree(&mut child.lock().unwrap());
+    code
+}
 
 struct Log {
     enabled: bool,
@@ -150,8 +180,10 @@ fn spawn_server(args: &[String], cwd: Option<&String>, log: &Log) -> Option<Chil
         if let Some(cwd) = cwd {
             command.current_dir(cwd);
         }
+        lifetime::prepare(&mut command);
         match command.spawn() {
             Ok(child) => {
+                lifetime::adopt(&child);
                 log.say(format!("server: {candidate}"));
                 return Some(child);
             }
@@ -219,16 +251,23 @@ fn main() {
         }
     }
 
+    // Always reported: without it a closed editor can leave luau-lsp running.
+    if let Err(error) = lifetime::guard_tree() {
+        eprintln!("[boundary] luau-lsp may outlive the proxy: {error}");
+    }
+
     let Some(mut child) = spawn_server(&forwarded, roots.first(), &log) else {
         std::process::exit(1);
     };
 
     let mut server_in = child.stdin.take().expect("server stdin");
     let server_out = child.stdout.take().expect("server stdout");
+    let child = Arc::new(Mutex::new(child));
 
     for body in &backlog {
         if write_message(&mut server_in, body).is_err() {
             eprintln!("[boundary] the server closed its input during the handshake");
+            reap(&child);
             std::process::exit(1);
         }
     }
@@ -237,8 +276,22 @@ fn main() {
 
     // editor -> server
     let up_pending = Arc::clone(&pending);
+    let up_child = Arc::clone(&child);
     let upstream = thread::spawn(move || {
-        while let Ok(Some(body)) = read_message(&mut editor_in) {
+        loop {
+            let body = match read_message(&mut editor_in) {
+                Ok(Some(body)) => body,
+                // EOF or a broken pipe: the editor is gone, whether or not it
+                // sent `shutdown` and `exit` first. A closed or crashed editor
+                // often does not, and luau-lsp does not stop on EOF alone.
+                // Ask it to exit, give it a moment, then end its tree.
+                _ => {
+                    let _ = write_message(&mut server_in, EXIT_NOTIFICATION);
+                    drop(server_in);
+                    reap(&up_child);
+                    std::process::exit(0);
+                }
+            };
             // Rule the message out on its bytes first. Document syncs are the
             // bulk of this direction and none of them can be a completion.
             if contains(&body, COMPLETION_METHOD) {
@@ -259,6 +312,9 @@ fn main() {
                 }
             }
             if write_message(&mut server_in, &body).is_err() {
+                // The server is gone. The editor is still there: the other
+                // direction sees the server's output close and exits with its
+                // status, which tells the editor to restart it.
                 break;
             }
         }
@@ -332,7 +388,10 @@ fn main() {
             }
         }
         if write_message(&mut editor_out, &body).is_err() {
-            break;
+            // Nobody reads the proxy any more: the editor is gone. The server
+            // has nobody to talk to either.
+            lifetime::end_tree(&mut child.lock().unwrap());
+            std::process::exit(0);
         }
     }
 
@@ -340,12 +399,9 @@ fn main() {
     // status rather than joining the upstream thread: that thread blocks in a
     // read until the editor closes its own end, and waiting on it would leave a
     // live but mute proxy where the editor expects a dead server it can
-    // restart.
+    // restart. A server that closed its output but is still alive after the
+    // grace period is of no use to anyone, and is ended with its tree.
     drop(upstream);
-    let code = child
-        .wait()
-        .ok()
-        .and_then(|status| status.code())
-        .unwrap_or(0);
+    let code = reap(&child).unwrap_or(1);
     std::process::exit(code);
 }

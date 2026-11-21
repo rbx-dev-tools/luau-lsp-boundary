@@ -1,6 +1,6 @@
 [package]
 name = "luau-lsp-boundary"
-version = "0.1.0"
+version = "0.1.2"
 edition = "2021"
 rust-version = "1.88"
 description = "Filters luau-lsp auto-import suggestions that cross a client/server boundary you define yourself"
@@ -13,6 +13,19 @@ globset = "0.4"
 # preserve_order: contexts are evaluated in the order they are written in the
 # rules file, not in a BTreeMap's alphabetical order.
 serde_json = { version = "1", features = ["preserve_order"] }
+
+# Both only to end luau-lsp together with the proxy (src/lifetime.rs): a job
+# object on Windows, a process group and signal handlers on Unix.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [profile.release]
 opt-level = "s"
