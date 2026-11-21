@@ -413,8 +413,8 @@ impl Pending {
 struct Root {
     path: String,
     rules: Rules,
-    /// Modification time of the rules file, `None` when it does not exist.
-    stamp: Option<std::time::SystemTime>,
+    /// Hash of the rules file's contents, `None` when it cannot be read.
+    stamp: Option<u64>,
     checked_at: std::time::Instant,
 }
 
@@ -426,7 +426,7 @@ pub struct Workspace {
 impl Workspace {
     pub const RULES_FILE: &'static str = ".luau-lsp-boundary.json";
 
-    /// How long a look at the rules file's timestamp is trusted before taking
+    /// How long a look at the rules file's contents is trusted before taking
     /// another. Completions fire on nearly every keystroke, and this keeps the
     /// reload check off that path without making an edit feel slow to land.
     pub const RELOAD_INTERVAL: std::time::Duration = std::time::Duration::from_millis(500);
@@ -454,16 +454,20 @@ impl Workspace {
         Path::new(root).join(Self::RULES_FILE)
     }
 
-    fn stamp_of(root: &str) -> Option<std::time::SystemTime> {
-        std::fs::metadata(Self::rules_path(root))
-            .ok()
-            .and_then(|meta| meta.modified().ok())
+    /// What tells one version of the rules file from another: its contents,
+    /// not its modification time. Two writes can share a timestamp, as two
+    /// saves close together do on a filesystem with a coarse clock, and the
+    /// second would then go unnoticed. The file is a few hundred bytes, read
+    /// at most once per [`Self::RELOAD_INTERVAL`].
+    fn stamp_of(root: &str) -> Option<u64> {
+        use std::hash::{DefaultHasher, Hash, Hasher};
+        let contents = std::fs::read(Self::rules_path(root)).ok()?;
+        let mut hasher = DefaultHasher::new();
+        contents.hash(&mut hasher);
+        Some(hasher.finish())
     }
 
-    fn read(
-        root: &str,
-        on_problem: &mut impl FnMut(&str, String),
-    ) -> (Rules, Option<std::time::SystemTime>) {
+    fn read(root: &str, on_problem: &mut impl FnMut(&str, String)) -> (Rules, Option<u64>) {
         let path = Self::rules_path(root);
         if !path.exists() {
             return (Rules::default(), None);
@@ -478,7 +482,7 @@ impl Workspace {
         }
     }
 
-    /// Re-reads any rules file whose timestamp moved, so editing it, creating
+    /// Re-reads any rules file whose contents changed, so editing it, creating
     /// it, or deleting it takes effect without restarting the language server.
     ///
     /// `on_change` fires only for roots that actually reloaded.
